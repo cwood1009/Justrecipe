@@ -1,3 +1,5 @@
+import type { Recipe } from "./recipe";
+
 // Builds "add to calendar" events: an .ics file (Apple Calendar on iPhone/Mac,
 // Outlook) and a Google Calendar link (Android).
 
@@ -22,6 +24,21 @@ export function durationMinutes(...times: (string | null)[]): number {
   return 60;
 }
 
+/**
+ * The event for cooking a recipe. It links to the recipe's original site, which
+ * anyone can open (a saved JustRecipe page needs its owner's sign-in).
+ */
+export function recipeEvent(recipe: Recipe, start: Date): CalendarEvent {
+  const ingredients = recipe.ingredients.map((i) => `• ${i}`).join("\n");
+  return {
+    title: `Cook: ${recipe.title}`,
+    start,
+    minutes: durationMinutes(recipe.totalTime, recipe.cookTime),
+    url: recipe.sourceUrl,
+    details: ingredients ? `Ingredients:\n${ingredients}`.slice(0, 1500) : "",
+  };
+}
+
 /** UTC timestamp in the compact form both formats use: 20261025T230000Z. */
 export function calendarStamp(date: Date): string {
   return date.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
@@ -38,16 +55,25 @@ export function googleCalendarUrl(event: CalendarEvent): string {
   return `https://calendar.google.com/calendar/render?${params}`;
 }
 
-/** Link to our .ics endpoint; iPhone Safari offers to add it to Calendar. */
-export function icsUrl(event: CalendarEvent): string {
-  const params = new URLSearchParams({
-    title: event.title,
-    start: calendarStamp(event.start),
-    minutes: String(event.minutes),
-    url: event.url,
-    details: event.details,
-  });
+/**
+ * Link to our .ics endpoint; iPhone Safari offers to add it to Calendar.
+ * The endpoint builds the event itself from a saved recipe (by id) or by
+ * reading the recipe's own page, so it never serves text a link made up.
+ */
+export function icsUrl(recipe: Recipe & { id?: string }, start: Date): string {
+  const params = new URLSearchParams(
+    recipe.id ? { recipe: recipe.id } : { source: recipe.sourceUrl },
+  );
+  params.set("start", calendarStamp(start));
   return `/api/calendar?${params}`;
+}
+
+/** Parses calendarStamp() output back into a Date, or null. */
+export function parseStamp(stamp: string): Date | null {
+  const m = stamp.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/);
+  if (!m) return null;
+  const date = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]));
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 function escapeText(value: string): string {

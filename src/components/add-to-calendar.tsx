@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useSyncExternalStore } from "react";
-import { durationMinutes, googleCalendarUrl, icsUrl, type CalendarEvent } from "@/lib/calendar";
+import { useState } from "react";
+import { googleCalendarUrl, icsUrl, recipeEvent } from "@/lib/calendar";
 import type { Recipe } from "@/lib/recipe";
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -20,26 +20,10 @@ function defaultStart(): { date: string; time: string } {
   };
 }
 
-export function AddToCalendar({ recipe }: { recipe: Recipe }) {
+export function AddToCalendar({ recipe }: { recipe: Recipe & { id?: string } }) {
   const [start, setStart] = useState(defaultStart);
-  // On a saved recipe, link back to it here; otherwise to the original site.
-  const pageUrl = useSyncExternalStore(
-    () => () => {},
-    () => window.location.href,
-    () => "",
-  );
-  const link = pageUrl.includes("/recipes/") ? pageUrl : recipe.sourceUrl;
-
   const startDate = new Date(`${start.date}T${start.time}`);
   const valid = !Number.isNaN(startDate.getTime());
-  const ingredients = recipe.ingredients.map((i) => `• ${i}`).join("\n");
-  const event: CalendarEvent = {
-    title: `Cook: ${recipe.title}`,
-    start: startDate,
-    minutes: durationMinutes(recipe.totalTime, recipe.cookTime),
-    url: link,
-    details: ingredients ? `Ingredients:\n${ingredients}`.slice(0, 1500) : "",
-  };
 
   return (
     <details className="relative">
@@ -66,14 +50,14 @@ export function AddToCalendar({ recipe }: { recipe: Recipe }) {
         </div>
         <div className="mt-4 flex flex-col gap-2">
           <a
-            href={valid ? icsUrl(event) : undefined}
+            href={valid ? icsUrl(recipe, startDate) : undefined}
             aria-disabled={!valid}
             className="rounded-full bg-accent px-4 py-2.5 text-center text-sm font-semibold text-white hover:bg-accent-hover aria-disabled:opacity-50"
           >
             iPhone / Apple Calendar
           </a>
           <a
-            href={valid ? googleCalendarUrl(event) : undefined}
+            href={valid ? googleCalendarUrl(recipeEvent(recipe, startDate)) : undefined}
             target="_blank"
             rel="noopener noreferrer"
             aria-disabled={!valid}
