@@ -1,6 +1,7 @@
 import "server-only";
 import * as cheerio from "cheerio";
-import type { CheerioAPI } from "cheerio";
+import type { Cheerio, CheerioAPI } from "cheerio";
+import type { AnyNode, Element } from "domhandler";
 import type { InstructionSection, Recipe } from "./recipe";
 
 type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
@@ -18,7 +19,9 @@ export function extractRecipe(html: string, pageUrl: string): Recipe {
   const fromJsonLd = findJsonLdRecipe($);
   const recipe = fromJsonLd
     ? fromSchema(fromJsonLd, pageUrl, siteName)
-    : fromMicrodata($, pageUrl, siteName) ?? fromKnownPlugins($, pageUrl, siteName);
+    : (fromMicrodata($, pageUrl, siteName) ??
+      fromKnownPlugins($, pageUrl, siteName) ??
+      fromHeadings($, pageUrl, siteName));
 
   if (!recipe || (recipe.ingredients.length === 0 && recipe.instructions.length === 0)) {
     throw new NoRecipeError(
@@ -320,6 +323,155 @@ function fromKnownPlugins($: CheerioAPI, pageUrl: string, siteName: string): Rec
     };
   }
   return null;
+}
+
+// ---------- Plain articles: "Ingredients" / "Instructions" headings ----------
+// Many blogs (Shopify, Squarespace, hand-written WordPress posts) have no
+// structured data, just a heading followed by a list.
+
+const INGREDIENTS_HEADING = /^(the\s+)?ingredients?\b/i;
+const STEPS_HEADING =
+  /^(the\s+)?(instructions?|directions?|method|steps|preparation|how to (make|prepare|cook)\b)/i;
+const END_HEADING =
+  /^(notes?|tips?|nutrition|faqs?|frequently asked|storage|storing|variations?|substitutions?|serving|equipment|related|you may also|conclusion|final thoughts|enjoy)\b/i;
+const HEADING_TAGS = new Set(["h1", "h2", "h3", "h4", "h5", "h6"]);
+const MAX_ITEMS = 100;
+
+function fromHeadings($: CheerioAPI, pageUrl: string, siteName: string): Recipe | null {
+  $("script, style, noscript, nav, header, footer, aside, form, iframe").remove();
+  const scope = [".rte", ".article__content", ".entry-content", ".post-content", "article", "main", "body"]
+    .map((sel) => $(sel).first())
+    .find((el) => el.length && /ingredients?/i.test(el.text()));
+  if (!scope) return null;
+
+  const markers = scope
+    .find("h1, h2, h3, h4, h5, h6, p, div")
+    .toArray()
+    .filter((el) => isMarker($, el));
+  const ingredientsAt = markers.find((el) => INGREDIENTS_HEADING.test(markerText($, el)));
+  const isSteps = (el: Element) => STEPS_HEADING.test(markerText($, el));
+  const stepsAt =
+    markers.slice(markers.indexOf(ingredientsAt as Element) + 1).find(isSteps) ?? markers.find(isSteps);
+  if (!ingredientsAt || !stepsAt) return null;
+
+  const ingredients = collectSection($, ingredientsAt).flatMap((s) => s.steps).map(stripBullet).filter(Boolean);
+  const instructions = collectSection($, stepsAt)
+    .map((s) => ({ name: s.name, steps: s.steps.map(stripStepNumber).filter(Boolean) }))
+    .filter((s) => s.steps.length);
+  if (!ingredients.length || !instructions.length) return null;
+
+  return {
+    title:
+      cleanText($('meta[property="og:title"]').attr("content")) ||
+      cleanText(scope.find("h1").first().text() || $("h1").first().text()) ||
+      cleanText($("title").text()) ||
+      "Untitled recipe",
+    description: cleanText($('meta[name="description"]').attr("content")) || null,
+    imageUrl: null,
+    sourceUrl: pageUrl,
+    siteName,
+    author: null,
+    yield: null,
+    prepTime: null,
+    cookTime: null,
+    totalTime: null,
+    ingredients: ingredients.slice(0, MAX_ITEMS),
+    instructions,
+  };
+}
+
+/** The text of a heading-like element, e.g. "Ingredients:" → "Ingredients". */
+function markerText($: CheerioAPI, el: Element): string {
+  return cleanText(firstLine($, el)).replace(/[:\s]+$/, "");
+}
+
+/** A short heading, or a paragraph that starts with bold heading text. */
+function isMarker($: CheerioAPI, el: Element): boolean {
+  const text = markerText($, el);
+  if (!text || text.length > 60) return false;
+  if (!INGREDIENTS_HEADING.test(text) && !STEPS_HEADING.test(text)) return false;
+  if (HEADING_TAGS.has(el.tagName)) return true;
+  if (el.tagName === "p") {
+    const first = $(el).children().first();
+    return /^(strong|b)$/.test(first.prop("tagName")?.toLowerCase() ?? "") || cleanText($(el).text()).length <= 60;
+  }
+  // A div counts only when it has no block children (some editors use bare divs).
+  return el.tagName === "div" && $(el).children("p, div, ul, ol, h1, h2, h3, h4, h5, h6").length === 0 &&
+    cleanText($(el).text()).length <= 60;
+}
+
+function firstLine($: CheerioAPI, el: Element): string {
+  return ($(el).html() ?? "").split(/<br\s*\/?>/i)[0];
+}
+
+function headingLevel(el: Element): number {
+  return HEADING_TAGS.has(el.tagName) ? Number(el.tagName[1]) : 7;
+}
+
+/**
+ * Reads the lists and paragraphs that follow a marker, up to the next section.
+ * Smaller sub-headings ("For the sauce") start a new named group.
+ */
+function collectSection($: CheerioAPI, marker: Element): InstructionSection[] {
+  const groups: InstructionSection[] = [{ name: null, steps: [] }];
+  const add = (text: string) => {
+    const t = cleanText(text);
+    if (t) groups[groups.length - 1].steps.push(t);
+  };
+  const startGroup = (name: string) => groups.push({ name: cleanText(name).replace(/:$/, ""), steps: [] });
+  const level = headingLevel(marker);
+
+  // "<p><strong>Ingredients:</strong><br>1 cup rice<br>…</p>" keeps the list inline.
+  const inline = ($(marker).html() ?? "").split(/<br\s*\/?>/i).slice(1);
+  inline.forEach(add);
+
+  let count = 0;
+  let node: Cheerio<AnyNode> = $(marker).next();
+  // If the marker is the only thing in its wrapper, keep walking from the wrapper.
+  if (!node.length && !inline.length) node = $(marker).parent().next();
+
+  while (node.length && count < MAX_ITEMS) {
+    const el = node.get(0) as Element;
+    const text = cleanText(node.text());
+    if (el.type === "tag") {
+      const isBoundary = (e: Element) =>
+        isMarker($, e) || (HEADING_TAGS.has(e.tagName) && END_HEADING.test(cleanText($(e).text())));
+      if (isBoundary(el) || node.find("h1, h2, h3, h4, h5, h6, p").toArray().some(isBoundary)) break;
+      if (text.length <= 60 && END_HEADING.test(text)) break;
+      if (HEADING_TAGS.has(el.tagName)) {
+        if (headingLevel(el) <= level) break;
+        startGroup(text);
+      } else if (el.tagName === "ul" || el.tagName === "ol") {
+        node.children("li").each((_, li) => {
+          add($(li).text());
+          count++;
+        });
+      } else if (el.tagName === "p" || el.tagName === "div") {
+        const lists = node.find("li");
+        if (lists.length) {
+          lists.each((_, li) => add($(li).text()));
+        } else if (text.length <= 60 && (/:$/.test(text) || /^for the\b/i.test(text))) {
+          startGroup(text);
+        } else if (text) {
+          (node.html() ?? "").split(/<br\s*\/?>/i).forEach(add);
+        }
+        count++;
+      } else if (el.tagName === "hr" || el.tagName === "figure" || el.tagName === "img") {
+        if (groups.some((g) => g.steps.length)) break;
+      }
+    }
+    node = node.next();
+  }
+
+  return groups.filter((g) => g.steps.length);
+}
+
+function stripBullet(text: string): string {
+  return text.replace(/^[•●▪︎◦\-–—*]\s*/, "").trim();
+}
+
+function stripStepNumber(text: string): string {
+  return text.replace(/^(step\s*)?\d+[.):]\s*/i, "").trim();
 }
 
 // ---------- helpers ----------
