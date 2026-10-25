@@ -33,7 +33,14 @@ const HEADERS = {
 
 const BLOCKED_MESSAGE = "This site blocked us. Try again in a minute.";
 
-export class FetchError extends Error {}
+/** "blocked" means the site refused us (403/429); the rest are bad links or network trouble. */
+export class FetchError extends Error {
+  readonly kind: "blocked" | "other";
+  constructor(message: string, kind: "blocked" | "other" = "other") {
+    super(message);
+    this.kind = kind;
+  }
+}
 
 function isPrivateAddress(ip: string): boolean {
   if (isIP(ip) === 4) {
@@ -152,7 +159,9 @@ export async function fetchPublicPage(
     } catch (err) {
       if (err instanceof FetchError) throw err;
       if (isTimeout(err)) {
-        throw new FetchError(retried ? BLOCKED_MESSAGE : "That website took too long to respond.");
+        throw retried
+          ? new FetchError(BLOCKED_MESSAGE, "blocked")
+          : new FetchError("That website took too long to respond.");
       }
       throw new FetchError("Couldn't reach that website.");
     }
@@ -164,7 +173,7 @@ export async function fetchPublicPage(
       try {
         await sleep(retryDelay(header(res.headers["retry-after"])), signal);
       } catch {
-        throw new FetchError(BLOCKED_MESSAGE);
+        throw new FetchError(BLOCKED_MESSAGE, "blocked");
       }
       hop--;
       continue;
@@ -180,11 +189,9 @@ export async function fetchPublicPage(
 
     if (res.status < 200 || res.status >= 300) {
       res.discard();
-      throw new FetchError(
-        res.status === 403 || res.status === 429
-          ? BLOCKED_MESSAGE
-          : `That website returned an error (${res.status}).`,
-      );
+      throw res.status === 403 || res.status === 429
+        ? new FetchError(BLOCKED_MESSAGE, "blocked")
+        : new FetchError(`That website returned an error (${res.status}).`);
     }
 
     const type = header(res.headers["content-type"]) ?? "";
