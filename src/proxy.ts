@@ -5,6 +5,14 @@ import { supabaseKey, supabaseUrl } from "@/lib/supabase/env";
 // Refreshes the Supabase session cookie on every navigation so Server
 // Components always see a valid token.
 export async function proxy(request: NextRequest) {
+  // When a confirmation link's redirect URL isn't on Supabase's allow list,
+  // Supabase sends the user to the Site URL root with ?code=. Finish sign-in there too.
+  if (request.nextUrl.pathname === "/" && request.nextUrl.searchParams.has("code")) {
+    const url = request.nextUrl.clone();
+    url.pathname = "/auth/confirm";
+    return NextResponse.redirect(url);
+  }
+
   let response = NextResponse.next({ request });
 
   const supabase = createServerClient(supabaseUrl(), supabaseKey(), {
