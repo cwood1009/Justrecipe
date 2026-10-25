@@ -9,6 +9,7 @@ type RecipeCard = {
   siteName: string | null;
   imageUrl: string | null;
   totalTime: string | null;
+  byline?: string;
 };
 
 export function RecipeGrid({ recipes }: { recipes: RecipeCard[] }) {
@@ -57,6 +58,7 @@ export function RecipeGrid({ recipes }: { recipes: RecipeCard[] }) {
                   {r.title}
                 </h2>
                 {r.totalTime && <p className="mt-1 text-sm text-muted">{r.totalTime}</p>}
+                {r.byline && <p className="mt-2 text-sm text-muted">{r.byline}</p>}
               </div>
             </Link>
           </li>
