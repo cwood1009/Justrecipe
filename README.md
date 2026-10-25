@@ -26,6 +26,7 @@ If someone clicks **Save** while signed out, they're sent to sign in. They then 
 2. **Create the tables.** Run each file in `supabase/migrations/` in the Supabase SQL editor, oldest first:
    - `20261025000000_create_recipes.sql`
    - `20261025010000_create_groups.sql`
+   - `20261025020000_private_group_helpers.sql`
 
    If you use the Supabase CLI, run `supabase db push` instead.
 
