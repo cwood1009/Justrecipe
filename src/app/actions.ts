@@ -36,6 +36,7 @@ async function findSavedId(sourceUrl: string): Promise<string | null> {
   const { data } = await supabase
     .from("recipes")
     .select("id")
+    .eq("user_id", user.id)
     .eq("source_url", sourceUrl)
     .maybeSingle();
   return data?.id ?? null;
