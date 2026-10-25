@@ -37,7 +37,8 @@ export async function proxy(request: NextRequest) {
 
   const { data } = await supabase.auth.getClaims();
 
-  if (!data?.claims && request.nextUrl.pathname.startsWith("/recipes")) {
+  const privatePath = /^\/(recipes|groups)(\/|$)/.test(request.nextUrl.pathname);
+  if (!data?.claims && privatePath) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     url.search = `?next=${encodeURIComponent(request.nextUrl.pathname)}`;

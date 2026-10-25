@@ -10,6 +10,12 @@ Built with Next.js 16 (App Router) and Supabase (auth + Postgres).
 - **Fetching** (`src/lib/safe-fetch.ts`): pages are requested with the same headers Chrome sends. If a site answers 403 or 429, the app waits briefly and retries once. If it's still blocked, the user sees "This site blocked us. Try again in a minute." Only public http(s) addresses are fetched; private and internal IPs are refused on every redirect and again at connect time. Downloads are capped at 15 seconds and 5 MB.
 - **Accounts**: Supabase email and password auth, with sessions kept in cookies through `@supabase/ssr`. `src/proxy.ts` refreshes the session on each request and sends signed-out visitors from `/recipes` to the login page.
 - **Saved recipes**: one `recipes` table. Row-level security means each user can only read and change their own rows. Saving the same link twice updates the existing row.
+- **Groups** (family, friends, a cooking club): anyone can start a group and invite people with a link. Recipes stay private until you share them. You can share them one at a time from the recipe's **Share** menu, or turn on **Share all my recipes** for a group. Members can view shared recipes and save their own copy. Row-level security enforces all of this in the database:
+  - you can only see groups you're in;
+  - you can only share your own recipes;
+  - only the owner of a recipe can change it.
+
+  When someone leaves a group, the recipes they shared go with them.
 
 If someone clicks **Save** while signed out, they're sent to sign in. They then come back to the same recipe, and it saves automatically.
 
@@ -17,7 +23,12 @@ If someone clicks **Save** while signed out, they're sent to sign in. They then 
 
 1. **Create a Supabase project** at [supabase.com](https://supabase.com).
 
-2. **Create the table.** Paste `supabase/migrations/20261025000000_create_recipes.sql` into the Supabase SQL editor and run it. If you use the Supabase CLI, run `supabase db push` instead.
+2. **Create the tables.** Run each file in `supabase/migrations/` in the Supabase SQL editor, oldest first:
+   - `20261025000000_create_recipes.sql`
+   - `20261025010000_create_groups.sql`
+   - `20261025020000_private_group_helpers.sql`
+
+   If you use the Supabase CLI, run `supabase db push` instead.
 
 3. **Add environment variables.** Copy `.env.example` to `.env.local` and fill in your project URL and publishable key. Both are under **Project Settings → API**. The legacy anon key also works as `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
 
