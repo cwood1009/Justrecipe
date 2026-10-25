@@ -27,6 +27,7 @@ If someone clicks **Save** while signed out, they're sent to sign in. They then 
    - `20261025000000_create_recipes.sql`
    - `20261025010000_create_groups.sql`
    - `20261025020000_private_group_helpers.sql`
+   - `20261025030000_extraction_failures.sql` and `20261025040000_failure_queue_retries.sql` (for the optional failure queue below; harmless if you don't use it)
 
    If you use the Supabase CLI, run `supabase db push` instead.
 
