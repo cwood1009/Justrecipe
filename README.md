@@ -6,8 +6,8 @@ Built with Next.js 16 (App Router) and Supabase (auth + Postgres).
 
 ## How it works
 
-- **Extraction** (`src/lib/extract.ts`): the server fetches the page and reads the recipe from its [schema.org/Recipe](https://schema.org/Recipe) JSON-LD, which nearly every recipe site publishes for Google. If that's missing, it falls back to microdata, then to common recipe-card plugins (WP Recipe Maker, Tasty Recipes, Create by Mediavine).
-- **Safe fetching** (`src/lib/safe-fetch.ts`): only public http(s) addresses are fetched. Private and internal IPs are blocked on every redirect hop, and downloads are capped at 12 seconds and 5 MB.
+- **Extraction** (`src/lib/extract.ts`): the server fetches the page and reads the recipe from its [schema.org/Recipe](https://schema.org/Recipe) JSON-LD, which nearly every recipe site publishes for Google. If that's missing, it falls back to microdata, then to common recipe-card plugins (WP Recipe Maker, Tasty Recipes, Create by Mediavine). As a last resort it reads plain articles, such as Shopify blogs: it finds the "Ingredients" and "Instructions"/"Directions"/"How to Make…" headings and takes the lists or paragraphs under them.
+- **Fetching** (`src/lib/safe-fetch.ts`): pages are requested with the same headers Chrome sends. If a site answers 403 or 429, the app waits briefly and retries once. If it's still blocked, the user sees "This site blocked us. Try again in a minute." Only public http(s) addresses are fetched; private and internal IPs are refused on every redirect and again at connect time. Downloads are capped at 15 seconds and 5 MB.
 - **Accounts**: Supabase email and password auth, with sessions kept in cookies through `@supabase/ssr`. `src/proxy.ts` refreshes the session on each request and sends signed-out visitors from `/recipes` to the login page.
 - **Saved recipes**: one `recipes` table. Row-level security means each user can only read and change their own rows. Saving the same link twice updates the existing row.
 

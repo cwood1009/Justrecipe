@@ -348,15 +348,20 @@ function fromHeadings($: CheerioAPI, pageUrl: string, siteName: string): Recipe 
     .find("h1, h2, h3, h4, h5, h6, p, div")
     .toArray()
     .filter((el) => isMarker($, el));
-  const ingredientsAt = markers.find((el) => INGREDIENTS_HEADING.test(markerText($, el)));
-  const isSteps = (el: Element) => STEPS_HEADING.test(markerText($, el));
+  const ingredientsAt =
+    markers.find((el) => INGREDIENTS_HEADING.test(markerText($, el))) ??
+    markers.find((el) => sectionKind(markerText($, el)) === "ingredients");
+  const isSteps = (el: Element) => sectionKind(markerText($, el)) === "steps";
   const stepsAt =
     markers.slice(markers.indexOf(ingredientsAt as Element) + 1).find(isSteps) ?? markers.find(isSteps);
   if (!ingredientsAt || !stepsAt) return null;
 
   const ingredients = collectSection($, ingredientsAt).flatMap((s) => s.steps).map(stripBullet).filter(Boolean);
   const instructions = collectSection($, stepsAt)
-    .map((s) => ({ name: s.name, steps: s.steps.map(stripStepNumber).filter(Boolean) }))
+    .map((s) => ({
+      name: s.name ? stripStepNumber(s.name) || null : null,
+      steps: s.steps.map(stripStepNumber).filter(Boolean),
+    }))
     .filter((s) => s.steps.length);
   if (!ingredients.length || !instructions.length) return null;
 
@@ -380,6 +385,15 @@ function fromHeadings($: CheerioAPI, pageUrl: string, siteName: string): Recipe 
   };
 }
 
+/** Whether a heading starts the ingredients or the steps, or neither. */
+function sectionKind(text: string): "ingredients" | "steps" | null {
+  if (INGREDIENTS_HEADING.test(text)) return "ingredients";
+  if (STEPS_HEADING.test(text)) return "steps";
+  if (/\bingredients?\b/i.test(text)) return "ingredients";
+  if (/\b(instructions?|directions?|method|how to (make|prepare|cook))\b/i.test(text)) return "steps";
+  return null;
+}
+
 /** The text of a heading-like element, e.g. "Ingredients:" → "Ingredients". */
 function markerText($: CheerioAPI, el: Element): string {
   return cleanText(firstLine($, el)).replace(/[:\s]+$/, "");
@@ -388,9 +402,14 @@ function markerText($: CheerioAPI, el: Element): string {
 /** A short heading, or a paragraph that starts with bold heading text. */
 function isMarker($: CheerioAPI, el: Element): boolean {
   const text = markerText($, el);
-  if (!text || text.length > 60) return false;
+  if (!text) return false;
+  // Real headings may be long and mention the dish ("How to Make Spicy Salmon Sushi Bake",
+  // "Ingredients for the Sushi Bake"); bold paragraphs must be short and start with the word.
+  if (HEADING_TAGS.has(el.tagName)) {
+    return text.length <= 100 && (sectionKind(text) !== null);
+  }
+  if (text.length > 60) return false;
   if (!INGREDIENTS_HEADING.test(text) && !STEPS_HEADING.test(text)) return false;
-  if (HEADING_TAGS.has(el.tagName)) return true;
   if (el.tagName === "p") {
     const first = $(el).children().first();
     return /^(strong|b)$/.test(first.prop("tagName")?.toLowerCase() ?? "") || cleanText($(el).text()).length <= 60;
@@ -434,9 +453,16 @@ function collectSection($: CheerioAPI, marker: Element): InstructionSection[] {
     const el = node.get(0) as Element;
     const text = cleanText(node.text());
     if (el.type === "tag") {
+      // A smaller heading of the same kind ("Spicy Mayo Ingredients") is a sub-group, not the end.
+      const isSubheading =
+        HEADING_TAGS.has(el.tagName) &&
+        headingLevel(el) > level &&
+        sectionKind(markerText($, el)) === sectionKind(markerText($, marker));
       const isBoundary = (e: Element) =>
         isMarker($, e) || (HEADING_TAGS.has(e.tagName) && END_HEADING.test(cleanText($(e).text())));
-      if (isBoundary(el) || node.find("h1, h2, h3, h4, h5, h6, p").toArray().some(isBoundary)) break;
+      if (!isSubheading && (isBoundary(el) || node.find("h1, h2, h3, h4, h5, h6, p").toArray().some(isBoundary))) {
+        break;
+      }
       if (text.length <= 60 && END_HEADING.test(text)) break;
       if (HEADING_TAGS.has(el.tagName)) {
         if (headingLevel(el) <= level) break;
