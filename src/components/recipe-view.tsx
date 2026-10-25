@@ -2,6 +2,7 @@
 
 import { useState, type ReactNode } from "react";
 import type { Recipe } from "@/lib/recipe";
+import { AddToCalendar } from "./add-to-calendar";
 
 export function RecipeView({ recipe, actions }: { recipe: Recipe; actions?: ReactNode }) {
   const [checked, setChecked] = useState<Set<number>>(new Set());
@@ -56,7 +57,10 @@ export function RecipeView({ recipe, actions }: { recipe: Recipe; actions?: Reac
               ))}
             </dl>
           )}
-          {actions && <div className="mt-6 flex flex-wrap items-center gap-3 print:hidden">{actions}</div>}
+          <div className="mt-6 flex flex-wrap items-center gap-3 print:hidden">
+            {actions}
+            <AddToCalendar recipe={recipe} />
+          </div>
         </div>
         {recipe.imageUrl && !imageFailed && (
           // Recipe images come from arbitrary hosts, so skip next/image optimization.
