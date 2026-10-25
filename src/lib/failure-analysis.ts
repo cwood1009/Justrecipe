@@ -1,12 +1,14 @@
 import "server-only";
 import * as cheerio from "cheerio";
 import { extractRecipe, NoRecipeError } from "./extract";
-import { fetchPublicPage } from "./safe-fetch";
+import { FetchError, fetchPublicPage } from "./safe-fetch";
 import { createAdminClient } from "./supabase/admin";
 
 const XAI_URL = "https://api.x.ai/v1/chat/completions";
 const MAX_PAGE_CHARS = 60_000;
 const ISSUE_EXCERPT_CHARS = 25_000;
+// Runs that may hit "blocked" on a link before it's marked failed.
+const MAX_ANALYSIS_TRIES = 3;
 
 type QueueRow = {
   id: string;
@@ -14,6 +16,7 @@ type QueueRow = {
   host: string;
   message: string | null;
   attempts: number;
+  analysis_tries: number;
 };
 
 export type Analysis = {
@@ -43,9 +46,10 @@ export async function processFailureQueue(
 
   const { data: rows, error } = await supabase
     .from("extraction_failures")
-    .select("id, url, host, message, attempts")
+    .select("id, url, host, message, attempts, analysis_tries")
+    // Every reason: a link's latest failure may be "blocked" even though the
+    // page has no readable recipe. Re-fetching below sorts out which it is.
     .eq("status", "new")
-    .eq("reason", "no_recipe")
     .order("first_seen", { ascending: true })
     .limit(limit);
   if (error) throw error;
@@ -88,7 +92,19 @@ export async function processFailureQueue(
         continue;
       }
 
-      const page = await fetchPublicPage(row.url);
+      let page;
+      try {
+        page = await fetchPublicPage(row.url);
+      } catch (err) {
+        if (!(err instanceof FetchError && err.kind === "blocked")) throw err;
+        // Blocked today: try again on a later run, up to a limit.
+        const tries = row.analysis_tries + 1;
+        await finish(tries < MAX_ANALYSIS_TRIES ? "new" : "failed", {
+          analysis_tries: tries,
+          message: err.message,
+        });
+        continue;
+      }
       try {
         extractRecipe(page.html, page.url);
         await finish("resolved"); // The current parser handles it now.

@@ -48,16 +48,16 @@ The app deploys to Vercel or any Node host that runs Next.js. Set the same envir
 
 ## Failure queue (optional)
 
-When a link fails, the server records it in the `extraction_failures` table. "No recipe found" and "site blocked us" both count. Once a day, Vercel Cron calls `/api/cron/analyze-failures`, which takes up to 3 queued "no recipe found" links and, for each:
+When a link fails, the server records it in the `extraction_failures` table. "No recipe found" and "site blocked us" both count. Once a day, Vercel Cron calls `/api/cron/analyze-failures`, which takes up to 3 queued links and, for each:
 
-1. Re-fetches the page. If today's parser now reads it, the link is marked resolved.
+1. Re-fetches the page. If today's parser now reads it, the link is marked resolved. If the site blocks the job too, it tries again on a later day, up to 3 times. Links are checked whatever their last failure was, because some sites alternate between blocking us and serving a page we can't parse.
 2. Sends a trimmed copy of the page to Grok (xAI). Grok says where the recipe is, why each parsing strategy missed it, and how `src/lib/extract.ts` should change.
 3. Files a GitHub issue labeled `extraction-failure`. The issue holds Grok's analysis, the recipe it found, and the page HTML to use as a test fixture. Later failures on the same site are added as comments on that issue instead of new issues.
 
 A scheduled Claude session can then pick up open `extraction-failure` issues and open pull requests with fixes.
 
 To turn it on:
-1. Run `supabase/migrations/20261025030000_extraction_failures.sql`.
+1. Run `supabase/migrations/20261025030000_extraction_failures.sql`, then `20261025040000_failure_queue_retries.sql`.
 2. Set these in Vercel (see `.env.example`):
    - `SUPABASE_SECRET_KEY`
    - `XAI_API_KEY` (and optionally `XAI_MODEL`, which defaults to `grok-4`)
