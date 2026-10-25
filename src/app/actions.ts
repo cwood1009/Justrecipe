@@ -2,7 +2,9 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 import { extractRecipe, NoRecipeError } from "@/lib/extract";
+import { recordFailure } from "@/lib/failure-queue";
 import { recipeToRow, type InstructionSection, type Recipe } from "@/lib/recipe";
 import { FetchError, fetchPublicPage } from "@/lib/safe-fetch";
 import { createClient, getCurrentUser } from "@/lib/supabase/server";
@@ -16,15 +18,24 @@ export async function extractRecipeFromUrl(input: string): Promise<ExtractResult
   if (!url) return { ok: false, error: "Paste a link to a recipe." };
   if (!/^https?:\/\//i.test(url)) url = `https://${url}`;
 
+  let pageUrl = url;
   try {
     const page = await fetchPublicPage(url);
+    pageUrl = page.url;
     const recipe = extractRecipe(page.html, page.url);
     return { ok: true, recipe, savedId: await findSavedId(recipe.sourceUrl) };
   } catch (err) {
-    if (err instanceof FetchError || err instanceof NoRecipeError) {
+    // Queue real misses for analysis, after the response so the user isn't kept waiting.
+    if (err instanceof NoRecipeError) {
+      after(() => recordFailure(pageUrl, "no_recipe", err.message));
+      return { ok: false, error: err.message };
+    }
+    if (err instanceof FetchError) {
+      if (err.kind === "blocked") after(() => recordFailure(pageUrl, "blocked", err.message));
       return { ok: false, error: err.message };
     }
     console.error("Recipe extraction failed", err);
+    after(() => recordFailure(pageUrl, "error", err instanceof Error ? err.message : String(err)));
     return { ok: false, error: "Something went wrong reading that page." };
   }
 }
