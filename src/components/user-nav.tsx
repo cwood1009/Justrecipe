@@ -26,6 +26,9 @@ export async function UserNav() {
       <Link href="/recipes" className="rounded-full px-3 py-2 font-medium hover:bg-accent-soft">
         My recipes
       </Link>
+      <Link href="/groups" className="rounded-full px-3 py-2 font-medium hover:bg-accent-soft">
+        Groups
+      </Link>
       <span className="hidden max-w-48 truncate text-muted sm:inline" title={user.email}>
         {user.email}
       </span>
